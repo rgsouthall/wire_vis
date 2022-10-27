@@ -154,15 +154,28 @@ class VIEW3D_OT_WireVis(Operator):
                 obbm.free()
 
             try:
+                wire_material = bpy.data.materials['wire_material']
+            except:
+                wire_material = bpy.data.materials.new(name='wire_material')
+
+            wire_material.diffuse_color = ows.wv_colour
+
+            try:
                 wire_object = bpy.data.objects['wire_object']
                 bm.transform(wire_object.matrix_world.inverted())
                 bm.to_mesh(wire_object.data)
-            except:
+                wire_object.color = ows.wv_colour
+            except Exception as e:
                 wire_mesh = bpy.data.meshes.new('wire_mesh')
                 wire_object = bpy.data.objects.new("wire_object", wire_mesh)
+                wire_object.display.show_shadows = False
+                wire_object.data.materials.append(wire_material)
                 bm.transform(wire_object.matrix_world.inverted())
                 bm.to_mesh(wire_mesh)
                 bpy.context.collection.objects.link(wire_object)
+                wire_object.color = ows.wv_colour
+
+
 
             bm.free()
             wvp.update = 0
@@ -187,12 +200,15 @@ class VIEW3D_OT_WireCancel(Operator):
         context.scene.wv_params.wv_display = 0
         return {'FINISHED'}
 
+
 def newrow(layout, s1, root, s2):
     row = layout.row()
     row.label(text=s1)
     row.prop(root, s2)
 
+
 classes = (WIREVIS_PT_object, WIREVIS_Object_Settings, WIREVIS_Scene_Settings, VIEW3D_OT_WireVis, WIREVIS_PT_scene, VIEW3D_OT_WireCancel)
+
 
 def register():
     for cl in classes:
@@ -200,6 +216,7 @@ def register():
 
     bpy.types.Scene.wv_params = PointerProperty(type=WIREVIS_Scene_Settings)
     bpy.types.Object.wirevis_settings = PointerProperty(type=WIREVIS_Object_Settings)
+
 
 def unregister():
     for cl in classes:
