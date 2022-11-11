@@ -58,6 +58,7 @@ class WIREVIS_Object_Settings(PropertyGroup):
     wv_dia: FloatProperty(name="mm", description="Wire diameter", default=20, min=0.1, max=1000, update=wire_update)
     wv_seg: IntProperty(name="", description="Wire segments", default=3, min=3, max=12, update=wire_update)
     wv_le: BoolProperty(name='', default=False, description='Lone edges', update=wire_update)
+    wv_len: FloatProperty(name="mm", description="Wire length cutoff", default=0.1, min = 0.0, update=wire_update)
 
 
 class WIREVIS_PT_scene(Panel):
@@ -98,6 +99,7 @@ class WIREVIS_PT_object(Panel):
             newrow(layout,  'Colour:',  ots,  "wv_colour")
             newrow(layout,  'Angle:',  ots,  "wv_angle")
             newrow(layout,  'Material boundary:',  ots,  "wv_material")
+            newrow(layout,  'Cutoff length:',  ots,  "wv_len")
             newrow(layout,  'Lone edges:',  ots,  "wv_le")
             newrow(layout,  'Extend:',  ots,  "wv_extend")
             newrow(layout,  'Segments:',  ots,  "wv_seg")
@@ -114,31 +116,33 @@ class VIEW3D_OT_WireVis(Operator):
     def invoke(self, context, event):
         scene = context.scene
         wvp = scene.wv_params
-#        self.draw_handle_wv = SpaceView3D.draw_handler_add(self.draw_wv, (self, context), "WINDOW", "POST_VIEW")
+        # self.draw_handle_wv = SpaceView3D.draw_handler_add(self.draw_wv, (self, context), "WINDOW", "POST_VIEW")
         context.window_manager.modal_handler_add(self)
         wvp.wv_display = 1
         wvp.update = 1
         return {'RUNNING_MODAL'}
 
+
     def modal(self, context, event):
         scene = context.scene
         wvp = scene.wv_params
+        dp = context.evaluated_depsgraph_get()
 
         if not wvp.wv_display:
             return {'FINISHED'}
-
-        dp = context.evaluated_depsgraph_get()
 
         if wvp.update:
             bm = bmesh.new()
 
             for ob in [ob for ob in scene.objects if ob.wirevis_settings.wv_bool]:
+                print(ob.name)
                 ows = ob.wirevis_settings
                 obbm = bmesh.new()
                 obbm.from_object(ob, dp)
                 obbm.transform(ob.matrix_world)
-                ecoords = [[v.co for v in e.verts] for e in obbm.edges if e.calc_face_angle(0.1) * 180/pi > ob.wirevis_settings.wv_angle or
-                           (ows.wv_material and len(e.link_faces) == 2 and len(set([f.material_index for f in e.link_faces])) == 2) or (ows.wv_le and len(e.link_faces) == 1)]
+                ecoords = [[v.co for v in e.verts] for e in obbm.edges if e.calc_face_angle(0.1) * 180/pi > ows.wv_angle or
+                           (ows.wv_material and len(e.link_faces) == 2 and len(set(f.material_index for f in e.link_faces)) == 2) or 
+                           (ows.wv_le and len(e.link_faces) == 1) and e.calc_length()*1000 > ows.wv_len]
                 ecentres = [(e[0] + e[1]) * 0.5 for e in ecoords]
 
                 for ei, ec in enumerate(ecentres):
