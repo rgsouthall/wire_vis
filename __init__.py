@@ -19,9 +19,9 @@
 bl_info = {"name": "Wire Visualiser",
            "author": "Ryan Southall",
            "version": (0, 4, 0),
-           "blender": (3, 2, 0),
+           "blender": (3, 3, 0),
            "location": "Object Properties Panel",
-           "description": "Display wireframes on selected geometry",
+           "description": "Display wireframes on specified geometry",
            "warning": "",
            "wiki_url": "tba",
            "tracker_url": "",
@@ -42,23 +42,29 @@ def wire_update(self, context):
         if area.type == 'VIEW_3D':
             area.tag_redraw()
 
+def wc_update(self, context):
+    context.scene.wv_params.cupdate = 1
+
+    for area in bpy.context.window.screen.areas:
+        if area.type == 'VIEW_3D':
+            area.tag_redraw()
 
 
 class WIREVIS_Scene_Settings(PropertyGroup):
     wv_display: BoolProperty(name='', default=False, description='Display wire')
     update: BoolProperty(name='', default=False, description='Update wire')
-
+    cupdate: BoolProperty(name='', default=False, description='Update wire colour')
 
 class WIREVIS_Object_Settings(PropertyGroup):
     wv_bool: BoolProperty(name='', default=False, description='Display wire', update=wire_update)
-    wv_colour: FloatVectorProperty(size=4, name="", attr="Colour", default=[0.0, 0.0, 0.0, 1.0], subtype='COLOR', min=0, max=1, update=wire_update)
+    wv_colour: FloatVectorProperty(size=4, name="", attr="Colour", default=[0.0, 0.0, 0.0, 1.0], subtype='COLOR', min=0, max=1, update=wc_update)
     wv_extend: FloatProperty(name="", description="Wire extension", default=0, min=0, max=1, update=wire_update)
     wv_angle: FloatProperty(name="", description="Wire angle", default=45, min=0, max=180, update=wire_update)
     wv_material: BoolProperty(name='', default=False, description='Material boundary', update=wire_update)
     wv_dia: FloatProperty(name="mm", description="Wire diameter", default=20, min=0.1, max=1000, update=wire_update)
     wv_seg: IntProperty(name="", description="Wire segments", default=3, min=3, max=12, update=wire_update)
     wv_le: BoolProperty(name='', default=False, description='Lone edges', update=wire_update)
-    wv_len: FloatProperty(name="mm", description="Wire length cutoff", default=0.1, min = 0.0, update=wire_update)
+    wv_len: FloatProperty(name="mm", description="Wire length cutoff", default=10, min = 0.0, update=wire_update)
 
 
 class WIREVIS_PT_scene(Panel):
@@ -127,22 +133,26 @@ class VIEW3D_OT_WireVis(Operator):
         scene = context.scene
         wvp = scene.wv_params
         dp = context.evaluated_depsgraph_get()
+        wv_obs = [ob for ob in scene.objects if ob.wirevis_settings.wv_bool]
 
         if not wvp.wv_display:
             return {'FINISHED'}
 
         if wvp.update:
             bm = bmesh.new()
+            
+            if not wv_obs:
+                self.report({'ERROR'}, 'No objects with the wire_vis display property turned on')
+                return {'CANCELLED'}
 
-            for ob in [ob for ob in scene.objects if ob.wirevis_settings.wv_bool]:
-                print(ob.name)
+            for oi, ob in enumerate(wv_obs):
                 ows = ob.wirevis_settings
                 obbm = bmesh.new()
                 obbm.from_object(ob, dp)
                 obbm.transform(ob.matrix_world)
-                ecoords = [[v.co for v in e.verts] for e in obbm.edges if e.calc_face_angle(0.1) * 180/pi > ows.wv_angle or
+                ecoords = [[v.co for v in e.verts] for e in obbm.edges if (e.calc_face_angle(0.1) * 180/pi > ows.wv_angle or
                            (ows.wv_material and len(e.link_faces) == 2 and len(set(f.material_index for f in e.link_faces)) == 2) or 
-                           (ows.wv_le and len(e.link_faces) == 1) and e.calc_length()*1000 > ows.wv_len]
+                           (ows.wv_le and len(e.link_faces) == 1)) and e.calc_length()*1000 > ows.wv_len]
                 ecentres = [(e[0] + e[1]) * 0.5 for e in ecoords]
 
                 for ei, ec in enumerate(ecentres):
@@ -150,6 +160,11 @@ class VIEW3D_OT_WireVis(Operator):
                     mat_trans = mathutils.Matrix.Translation(ec)
                     mat_rot = mathutils.Vector((0, 0, 1)).rotation_difference(ecoords[ei][1] - ec).to_matrix().to_4x4()
                     wire_verts = bmesh.ops.create_cone(bm, cap_ends=1, cap_tris=1, segments=ows.wv_seg, radius1=ows.wv_dia * 0.001, radius2=ows.wv_dia * 0.001, depth=length, matrix=mat_trans@mat_rot)['verts']
+                    
+                    for v in wire_verts:
+                        for f in v.link_faces:
+                            f.material_index = oi
+
 
                     if ows.wv_extend > 0:
                         wire_verts[0].co += (wire_verts[0].co - ec).normalized() * ows.wv_extend
@@ -157,29 +172,29 @@ class VIEW3D_OT_WireVis(Operator):
 
                 obbm.free()
 
-            try:
-                wire_material = bpy.data.materials['wire_material']
-            except:
-                wire_material = bpy.data.materials.new(name='wire_material')
+                try:
+                    wire_material = bpy.data.materials[f'wire_material-{oi}']
+                except:
+                    wire_material = bpy.data.materials.new(name=f'wire_material-{oi}')
 
-            wire_material.diffuse_color = ows.wv_colour
+                wire_material.diffuse_color = ows.wv_colour
 
             try:
                 wire_object = bpy.data.objects['wire_object']
-                bm.transform(wire_object.matrix_world.inverted())
-                bm.to_mesh(wire_object.data)
-                wire_object.color = ows.wv_colour
+            
             except Exception as e:
                 wire_mesh = bpy.data.meshes.new('wire_mesh')
                 wire_object = bpy.data.objects.new("wire_object", wire_mesh)
-                wire_object.display.show_shadows = False
-                wire_object.data.materials.append(wire_material)
-                bm.transform(wire_object.matrix_world.inverted())
-                bm.to_mesh(wire_mesh)
                 bpy.context.collection.objects.link(wire_object)
-                wire_object.color = ows.wv_colour
+                wire_object.display.show_shadows = False
+                
+            bm.transform(wire_object.matrix_world.inverted())
+            bm.to_mesh(wire_object.data)
 
-
+            for i in range(oi + 1):
+                while i >= len(wire_object.material_slots):
+                    wire_object.data.materials.append(bpy.data.materials[f'wire_material-{i}'])
+                
 
             bm.free()
             wvp.update = 0
@@ -187,10 +202,15 @@ class VIEW3D_OT_WireVis(Operator):
             for area in context.window.screen.areas:
                 if area.type == 'VIEW_3D':
                     area.tag_redraw()
-
-            return {'PASS_THROUGH'}
-        else:
-            return {'PASS_THROUGH'}
+        
+        elif wvp.cupdate:
+            wire_object = bpy.data.objects['wire_object']
+            wvp.cupdate = 0
+            
+            for oi, ob in enumerate(wv_obs):
+                wire_object.material_slots[oi].material.diffuse_color = ob.wirevis_settings.wv_colour
+            
+        return {'PASS_THROUGH'}
 
 
 class VIEW3D_OT_WireCancel(Operator):
