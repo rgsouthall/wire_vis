@@ -19,7 +19,7 @@
 bl_info = {"name": "Wire Visualiser",
            "author": "Ryan Southall",
            "version": (0, 4, 0),
-           "blender": (3, 3, 0),
+           "blender": (3, 4, 0),
            "location": "Object Properties Panel",
            "description": "Display wireframes on specified geometry",
            "warning": "",
