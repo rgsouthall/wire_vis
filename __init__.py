@@ -257,7 +257,8 @@ class VIEW3D_OT_WireVis(Operator):
             swv.cupdate = 0
 
             for oi, ob in enumerate(wv_obs):
-                wire_object.material_slots[oi].material.diffuse_color = ob.wirevis_settings.wv_colour
+                colour = swv.wv_colour if swv.wv_override else ob.wirevis_settings.wv_colour
+                wire_object.material_slots[oi].material.diffuse_color = colour
 
         return {'PASS_THROUGH'}
 
