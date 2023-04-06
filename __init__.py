@@ -27,7 +27,7 @@ bl_info = {"name": "Wire Visualiser",
            "tracker_url": "",
            "category": "Object"}
 
-import bpy, gpu, bgl, bmesh, mathutils, datetime
+import bpy, gpu, bmesh, mathutils, datetime
 from math import pi
 from bpy.props import BoolProperty, PointerProperty, FloatVectorProperty, FloatProperty, IntProperty
 from bpy.types import Panel, PropertyGroup, Operator, SpaceView3D
