@@ -29,7 +29,7 @@ bl_info = {"name": "Wire Visualiser",
 
 import bpy, gpu, bmesh, mathutils, datetime
 from math import pi
-from bpy.props import BoolProperty, PointerProperty, FloatVectorProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, PointerProperty, FloatVectorProperty, FloatProperty, IntProperty, EnumProperty
 from bpy.types import Panel, PropertyGroup, Operator, SpaceView3D
 from gpu.types import GPUShader
 from gpu_extras.batch import batch_for_shader
@@ -58,6 +58,7 @@ class WIREVIS_Scene_Settings(PropertyGroup):
     wv_override: BoolProperty(name='', default=False, description='Wire override', update=wire_update)
     wv_colour: FloatVectorProperty(size=4, name="", attr="Colour", default=[0.0, 0.0, 0.0, 1.0], subtype='COLOR', min=0, max=1, update=wc_update)
     wv_extend: FloatProperty(name="", description="Wire extension", default=0, min=0, max=1, update=wire_update)
+    wv_extend_type: EnumProperty(name='', items=[('0', 'Relative', 'Relative extend'), ('1', 'Absolute', 'Absolute extend')], description='Type pf wire extend', default='0', update=wire_update)
     wv_angle: FloatProperty(name="", description="Wire angle", default=45, min=0, max=180, update=wire_update)
     wv_material: BoolProperty(name='', default=False, description='Material boundary', update=wire_update)
     wv_dia: FloatProperty(name="mm", description="Wire diameter", default=20, min=0.1, max=1000, update=wire_update)
@@ -70,6 +71,7 @@ class WIREVIS_Object_Settings(PropertyGroup):
     wv_bool: BoolProperty(name='', default=False, description='Display wire', update=wire_update)
     wv_colour: FloatVectorProperty(size=4, name="", attr="Colour", default=[0.0, 0.0, 0.0, 1.0], subtype='COLOR', min=0, max=1, update=wc_update)
     wv_extend: FloatProperty(name="", description="Wire extension", default=0, min=0, max=1, update=wire_update)
+    wv_extend_type: EnumProperty(name='', items=[('0', 'Relative', 'Relative extend'), ('1', 'Absolute', 'Absolute extend')], description='Type pf wire extend', default='0', update=wire_update)
     wv_angle: FloatProperty(name="", description="Wire angle", default=45, min=0, max=180, update=wire_update)
     wv_material: BoolProperty(name='', default=False, description='Material boundary', update=wire_update)
     wv_dia: FloatProperty(name="mm", description="Wire diameter", default=20, min=0.1, max=1000, update=wire_update)
@@ -98,6 +100,8 @@ class WIREVIS_PT_scene(Panel):
             newrow(layout,  'Cutoff length:',  swv,  "wv_len")
             newrow(layout,  'Lone edges:',  swv,  "wv_le")
             newrow(layout,  'Extend:',  swv,  "wv_extend")
+            if swv.wv_extend:
+                newrow(layout,  'Extend type:',  swv,  "wv_extend_type")
             newrow(layout,  'Segments:',  swv,  "wv_seg")
             newrow(layout,  'Diameter:',  swv,  "wv_dia")
 
@@ -133,6 +137,8 @@ class WIREVIS_PT_object(Panel):
             newrow(layout,  'Cutoff length:',  owv,  "wv_len")
             newrow(layout,  'Lone edges:',  owv,  "wv_le")
             newrow(layout,  'Extend:',  owv,  "wv_extend")
+            if owv.wv_extend:
+                newrow(layout,  'Extend type:',  owv,  "wv_extend_type")
             newrow(layout,  'Segments:',  owv,  "wv_seg")
             newrow(layout,  'Diameter:',  owv,  "wv_dia")
 
@@ -206,8 +212,12 @@ class VIEW3D_OT_WireVis(Operator):
                             v.co[2] = e_lens[ei] * 0.5
 
                     if ows.wv_extend > 0:
-                        nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * ows.wv_extend * e_lens[ei]**0.5
-                        nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * ows.wv_extend * e_lens[ei]**0.5
+                        if ows.wv_extend_type == '0':
+                            nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * ows.wv_extend * e_lens[ei]**0.5
+                            nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * ows.wv_extend * e_lens[ei]**0.5
+                        else:
+                            nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * ows.wv_extend
+                            nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * ows.wv_extend
 
                     bmesh.ops.transform(nbm, matrix=mat_trans@mat_rot, verts=nbm.verts)
                     verts_out += [v.co.to_tuple() for v in nbm.verts]
