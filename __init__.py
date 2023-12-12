@@ -165,7 +165,9 @@ class VIEW3D_OT_WireVis(Operator):
         scene = context.scene
         swv = scene.wv_params
         dp = context.evaluated_depsgraph_get()
+        vl_colls = context.view_layer.layer_collection.children
         wv_obs = [ob for ob in scene.objects if ob.wirevis_settings.wv_bool]
+        wv_obs = [ob for ob in wv_obs if any([not vl_colls[c.name].exclude for c in ob.users_collection if c.name in vl_colls]) or all([c == scene.collection for c in ob.users_collection])]
         verts_out, faces_out, mis_out = [], [], []
 
         if not swv.wv_display:
