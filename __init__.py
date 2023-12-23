@@ -28,7 +28,7 @@ bl_info = {"name": "Wire Visualiser",
            "category": "Object"}
 
 import bpy, gpu, bmesh, mathutils, datetime
-from math import pi
+from math import pi, radians
 from bpy.props import BoolProperty, PointerProperty, FloatVectorProperty, FloatProperty, IntProperty, EnumProperty
 from bpy.types import Panel, PropertyGroup, Operator, SpaceView3D
 from gpu.types import GPUShader
@@ -51,6 +51,11 @@ def wc_update(self, context):
             area.tag_redraw()
 
 
+def get_all_children(col):
+    yield col
+    for child in col.children:
+        yield from get_all_children(child)
+
 class WIREVIS_Scene_Settings(PropertyGroup):
     wv_display: BoolProperty(name='', default=False, description='Display wire')
     update: BoolProperty(name='', default=False, description='Update wire')
@@ -65,7 +70,7 @@ class WIREVIS_Scene_Settings(PropertyGroup):
     wv_seg: IntProperty(name="", description="Wire segments", default=3, min=3, max=12, update=wire_update)
     wv_le: BoolProperty(name='', default=False, description='Lone edges', update=wire_update)
     wv_len: FloatProperty(name="mm", description="Wire length cutoff", default=10, min=0.0, update=wire_update)
-
+    wv_rotate: FloatProperty(name="", description="Twist angle", default=0, min=0, max=360, update=wire_update)
 
 class WIREVIS_Object_Settings(PropertyGroup):
     wv_bool: BoolProperty(name='', default=False, description='Display wire', update=wire_update)
@@ -78,7 +83,7 @@ class WIREVIS_Object_Settings(PropertyGroup):
     wv_seg: IntProperty(name="", description="Wire segments", default=3, min=3, max=12, update=wire_update)
     wv_le: BoolProperty(name='', default=False, description='Lone edges', update=wire_update)
     wv_len: FloatProperty(name="mm", description="Wire length cutoff", default=10, min=0.0, update=wire_update)
-
+    wv_rotate: FloatProperty(name="", description="Twist angle", default=0, min=0, max=360, update=wire_update)
 
 class WIREVIS_PT_scene(Panel):
     '''WireVis 3D view panel'''
@@ -91,19 +96,22 @@ class WIREVIS_PT_scene(Panel):
         scene = context.scene
         swv = scene.wv_params
         layout = self.layout
-        newrow(layout,  'Override:',  swv,  "wv_override")
+        newrow(layout, 'Override:', swv, "wv_override")
 
         if swv.wv_override:
-            newrow(layout,  'Colour:', swv,  "wv_colour")
-            newrow(layout,  'Angle:',  swv,  "wv_angle")
-            newrow(layout,  'Material boundary:',  swv,  "wv_material")
-            newrow(layout,  'Cutoff length:',  swv,  "wv_len")
-            newrow(layout,  'Lone edges:',  swv,  "wv_le")
-            newrow(layout,  'Extend:',  swv,  "wv_extend")
+            newrow(layout, 'Colour:', swv, "wv_colour")
+            newrow(layout, 'Angle:', swv, "wv_angle")
+            newrow(layout, 'Material boundary:', swv, "wv_material")
+            newrow(layout, 'Cutoff length:', swv, "wv_len")
+            newrow(layout, 'Lone edges:', swv, "wv_le")
+            newrow(layout, 'Extend:', swv, "wv_extend")
+
             if swv.wv_extend:
                 newrow(layout,  'Extend type:',  swv,  "wv_extend_type")
-            newrow(layout,  'Segments:',  swv,  "wv_seg")
-            newrow(layout,  'Diameter:',  swv,  "wv_dia")
+
+            newrow(layout, 'Twist:', swv, "wv_rotate")    
+            newrow(layout, 'Segments:', swv, "wv_seg")
+            newrow(layout, 'Diameter:', swv, "wv_dia")
 
         row = layout.row()
 
@@ -131,16 +139,19 @@ class WIREVIS_PT_object(Panel):
         newrow(layout,  'Display:',  owv,  "wv_bool")
 
         if owv.wv_bool:
-            newrow(layout,  'Colour:',  owv,  "wv_colour")
-            newrow(layout,  'Angle:',  owv,  "wv_angle")
-            newrow(layout,  'Material boundary:',  owv,  "wv_material")
-            newrow(layout,  'Cutoff length:',  owv,  "wv_len")
-            newrow(layout,  'Lone edges:',  owv,  "wv_le")
-            newrow(layout,  'Extend:',  owv,  "wv_extend")
+            newrow(layout, 'Colour:',  owv,  "wv_colour")
+            newrow(layout, 'Angle:',  owv,  "wv_angle")
+            newrow(layout, 'Material boundary:',  owv,  "wv_material")
+            newrow(layout, 'Cutoff length:',  owv,  "wv_len")
+            newrow(layout, 'Lone edges:',  owv,  "wv_le")
+            newrow(layout, 'Extend:',  owv,  "wv_extend")
+
             if owv.wv_extend:
-                newrow(layout,  'Extend type:',  owv,  "wv_extend_type")
-            newrow(layout,  'Segments:',  owv,  "wv_seg")
-            newrow(layout,  'Diameter:',  owv,  "wv_dia")
+                newrow(layout, 'Extend type:',  owv,  "wv_extend_type")
+            
+            newrow(layout, 'Twist:',  owv,  "wv_rotate")
+            newrow(layout, 'Segments:',  owv,  "wv_seg")
+            newrow(layout, 'Diameter:',  owv,  "wv_dia")
 
 
 class VIEW3D_OT_WireVis(Operator):
@@ -165,9 +176,11 @@ class VIEW3D_OT_WireVis(Operator):
         scene = context.scene
         swv = scene.wv_params
         dp = context.evaluated_depsgraph_get()
-        vl_colls = context.view_layer.layer_collection.children
+        vl_colls = get_all_children(context.view_layer.layer_collection)
         wv_obs = [ob for ob in scene.objects if ob.wirevis_settings.wv_bool]
-        wv_obs = [ob for ob in wv_obs if any([not vl_colls[c.name].exclude for c in ob.users_collection if c.name in vl_colls]) or all([c == scene.collection for c in ob.users_collection])]
+        vl_colls = [v for v in vl_colls]
+        vl_coll_names = [v.name for v in vl_colls]
+        wv_obs = [ob for ob in wv_obs if any([not vl_colls[vl_coll_names.index(c.name)].exclude for c in ob.users_collection if c.name in vl_coll_names]) or all([c == scene.collection for c in ob.users_collection])]
         verts_out, faces_out, mis_out = [], [], []
 
         if not swv.wv_display:
@@ -207,6 +220,9 @@ class VIEW3D_OT_WireVis(Operator):
                     low_z = nbm.verts[0].co[2]
                     hi_z = nbm.verts[1].co[2]
 
+                    if ows.wv_rotate > 0:
+                        bmesh.ops.rotate(nbm, cent=nbm.verts[1].co, matrix=mathutils.Matrix.Rotation(radians(ows.wv_rotate), 4, 'Z'), verts=[v for v in nbm.verts if v.co[2] == hi_z])
+
                     for v in nbm.verts:
                         if v.co[2] == low_z:
                             v.co[2] = -e_lens[ei] * 0.5
@@ -220,12 +236,13 @@ class VIEW3D_OT_WireVis(Operator):
                         else:
                             nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * ows.wv_extend
                             nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * ows.wv_extend
-
+                    
                     bmesh.ops.transform(nbm, matrix=mat_trans@mat_rot, verts=nbm.verts)
                     verts_out += [v.co.to_tuple() for v in nbm.verts]
                     faces_out += [[lvo + j.index + ei * len(nbm.verts) for j in i.verts] for i in nbm.faces]
                     mis_out += [oi for f in nbm.faces]
                     nbm.free()
+                
                 try:
                     wire_material = bpy.data.materials[f'wire_material-{oi}']
                 except Exception:
