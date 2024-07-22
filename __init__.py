@@ -19,9 +19,9 @@
 bl_info = {"name": "Wire Visualiser",
            "author": "Ryan Southall",
            "version": (0, 4, 0),
-           "blender": (3, 4, 0),
+           "blender": (4, 2, 0),
            "location": "Object Properties Panel",
-           "description": "Display wireframes on specified geometry",
+           "description": "Display wire frames on specified geometry",
            "warning": "",
            "wiki_url": "tba",
            "tracker_url": "",
@@ -33,6 +33,7 @@ from bpy.props import BoolProperty, PointerProperty, FloatVectorProperty, FloatP
 from bpy.types import Panel, PropertyGroup, Operator, SpaceView3D
 from gpu.types import GPUShader
 from gpu_extras.batch import batch_for_shader
+from mathutils import Vector
 
 
 def wire_update(self, context):
@@ -227,16 +228,21 @@ class VIEW3D_OT_WireVis(Operator):
                 obbm = bmesh.new()
                 obbm.from_object(ob, dp)
                 obbm.transform(ob.matrix_world)
-                ecoords = [[v.co for v in e.verts] for e in obbm.edges if (e.calc_face_angle(0.1) * 180/pi >= ows.wv_angle or
+                valid_edges = [e for e in obbm.edges if (e.calc_face_angle(0.1) * 180/pi >= ows.wv_angle or
                            (ows.wv_material and len(e.link_faces) == 2 and len(set(f.material_index for f in e.link_faces)) == 2) or
                            (ows.wv_le and len(e.link_faces) == 1)) and e.calc_length()*1000 > ows.wv_len]
+
+                ecoords = [[v.co for v in e.verts] for e in valid_edges]
                 ecentres = [(e[0] + e[1]) * 0.5 for e in ecoords]
+                enormals = [sum((f.normal for f in e.link_faces), Vector()).normalized() for e in valid_edges]
                 e_lens = [(e[0] - e[1]).length for e in ecoords]
                 lvo = len(verts_out)
 
                 for ei, ec in enumerate(ecentres):
                     mat_trans = mathutils.Matrix.Translation(ec)
                     mat_rot = mathutils.Vector((0, 0, 1)).rotation_difference(ecoords[ei][1] - ec).to_matrix().to_4x4()
+                    mr = mat_rot@mathutils.Vector((0, 1, 0))
+                    mat_rot2 = mr.rotation_difference(enormals[ei]).to_matrix().to_4x4()
                     nbm = wbm.copy()
                     nbm.verts.ensure_lookup_table()
 
@@ -276,7 +282,7 @@ class VIEW3D_OT_WireVis(Operator):
                             nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * ows.wv_extend
                             nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * ows.wv_extend
                     
-                    bmesh.ops.transform(nbm, matrix=mat_trans@mat_rot, verts=nbm.verts)
+                    bmesh.ops.transform(nbm, matrix=mat_trans@mat_rot2@mat_rot, verts=nbm.verts)
                     verts_out += [v.co.to_tuple() for v in nbm.verts]
                     faces_out += [[lvo + j.index + ei * len(nbm.verts) for j in i.verts] for i in nbm.faces]
                     mis_out += [oi for f in nbm.faces]
@@ -326,8 +332,12 @@ class VIEW3D_OT_WireVis(Operator):
                 wire_object.display.show_shadows = False
 
             for i in range(oi + 1):
-                while i >= len(wire_object.material_slots):
-                    wire_object.data.materials.append(bpy.data.materials[f'wire_material-{i}'])
+                if not swv.wv_override:
+                    while i >= len(wire_object.material_slots):
+                        wire_object.data.materials.append(bpy.data.materials[f'wire_material-{i}'])
+                else:
+                    if 'wire_material-0' not in wire_object.data.materials:
+                        wire_object.data.materials.append(bpy.data.materials['wire_material-0'])
 
             swv.update = 0
 
