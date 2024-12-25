@@ -64,7 +64,7 @@ class WIREVIS_Scene_Settings(PropertyGroup):
     cupdate: BoolProperty(name='', default=False, description='Update wire colour')
     wv_override: BoolProperty(name='', default=False, description='Wire override', update=wire_update)
     wv_colour: FloatVectorProperty(size=4, name="", attr="Colour", default=[0.0, 0.0, 0.0, 1.0], subtype='COLOR', min=0, max=1, update=wc_update)
-    wv_extend: FloatProperty(name="", description="Wire extension", default=0, min=0, max=1, update=wire_update)
+    wv_extend: FloatProperty(name="", description="Wire extension", default=0, min=0, update=wire_update)
     wv_extend_type: EnumProperty(name='', items=[('0', 'Relative', 'Relative extend'), ('1', 'Absolute', 'Absolute extend')], description='Type pf wire extend', default='0', update=wire_update)
     wv_angle: FloatProperty(name="", description="Wire angle", default=45, min=0, max=180, update=wire_update)
     wv_material: BoolProperty(name='', default=False, description='Material boundary', update=wire_update)
@@ -80,7 +80,7 @@ class WIREVIS_Scene_Settings(PropertyGroup):
 class WIREVIS_Object_Settings(PropertyGroup):
     wv_bool: BoolProperty(name='', default=False, description='Display wire', update=wire_update)
     wv_colour: FloatVectorProperty(size=4, name="", attr="Colour", default=[0.0, 0.0, 0.0, 1.0], subtype='COLOR', min=0, max=1, update=wc_update)
-    wv_extend: FloatProperty(name="", description="Wire extension", default=0, min=0, max=1, update=wire_update)
+    wv_extend: FloatProperty(name="", description="Wire extension", default=0, min=0, update=wire_update)
     wv_extend_type: EnumProperty(name='', items=[('0', 'Relative', 'Relative extend'), ('1', 'Absolute', 'Absolute extend')], description='Type of wire extend', default='0', update=wire_update)
     wv_angle: FloatProperty(name="", description="Wire angle", default=45, min=0, max=180, update=wire_update)
     wv_material: BoolProperty(name='', default=False, description='Material boundary', update=wire_update)
@@ -183,6 +183,15 @@ class VIEW3D_OT_WireVis(Operator):
         wm = context.window_manager
         scene = context.scene
         wvp = scene.wv_params
+
+        try:
+            wire_object = bpy.data.objects['wire_object']
+            wire_object.location = (0, 0, 0)
+            wire_object.scale = (1, 1, 1)
+            wire_object.rotation_euler = (0, 0, 0)
+        except Exception as e:
+            print(e)
+
         self._timer = wm.event_timer_add(0.05, window=context.window)
         wm.modal_handler_add(self)
         wvp.wv_display = 1
@@ -228,10 +237,11 @@ class VIEW3D_OT_WireVis(Operator):
                 obbm = bmesh.new()
                 obbm.from_object(ob, dp)
                 obbm.transform(ob.matrix_world)
-                valid_edges = [e for e in obbm.edges if (e.calc_face_angle(0.1) * 180/pi >= ows.wv_angle or
+                bmesh.ops.triangulate(obbm, faces=obbm.faces, quad_method='BEAUTY', ngon_method='BEAUTY')
+                obbm.normal_update()
+                valid_edges = [e for e in obbm.edges if sum((f.normal for f in e.link_faces), Vector()).normalized().length and (e.calc_face_angle(0.1) * 180/pi >= ows.wv_angle or
                            (ows.wv_material and len(e.link_faces) == 2 and len(set(f.material_index for f in e.link_faces)) == 2) or
                            (ows.wv_le and len(e.link_faces) == 1)) and e.calc_length()*1000 > ows.wv_len]
-
                 ecoords = [[v.co for v in e.verts] for e in valid_edges]
                 ecentres = [(e[0] + e[1]) * 0.5 for e in ecoords]
                 enormals = [sum((f.normal for f in e.link_faces), Vector()).normalized() for e in valid_edges]
@@ -239,10 +249,16 @@ class VIEW3D_OT_WireVis(Operator):
                 lvo = len(verts_out)
 
                 for ei, ec in enumerate(ecentres):
+                    e_diff = ecoords[ei][0] - ec if (ecoords[ei][0] - ec).magnitude < 0 else ecoords[ei][1] - ec
                     mat_trans = mathutils.Matrix.Translation(ec)
-                    mat_rot = mathutils.Vector((0, 0, 1)).rotation_difference(ecoords[ei][1] - ec).to_matrix().to_4x4()
+                    mat_rot = mathutils.Vector((0, 0, 1)).rotation_difference(e_diff).to_matrix().to_4x4()
                     mr = mat_rot@mathutils.Vector((0, 1, 0))
-                    mat_rot2 = mr.rotation_difference(enormals[ei]).to_matrix().to_4x4()
+                    mat_rot2 = mr.rotation_difference(enormals[ei])
+
+                    if mr.dot(enormals[ei]) == -1:
+                        mat_rot2 = mathutils.Euler([pi*v for v in (ecoords[ei][0] - ec).normalized()], 'XYZ').to_quaternion()
+
+                    mat_rot2 = mat_rot2.to_matrix().to_4x4()
                     nbm = wbm.copy()
                     nbm.verts.ensure_lookup_table()
 
@@ -276,13 +292,13 @@ class VIEW3D_OT_WireVis(Operator):
 
                     if ows.wv_extend > 0:
                         if ows.wv_extend_type == '0':
-                            nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * ows.wv_extend * e_lens[ei]**0.5
-                            nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * ows.wv_extend * e_lens[ei]**0.5
+                            nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * 0.01 * ows.wv_extend * e_lens[ei]**0.5
+                            nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * 0.01 * ows.wv_extend * e_lens[ei]**0.5
                         else:
-                            nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * ows.wv_extend
-                            nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * ows.wv_extend
+                            nbm.verts[0].co += mathutils.Vector((0, 0, -1)) * 0.01 * ows.wv_extend
+                            nbm.verts[1].co += mathutils.Vector((0, 0, 1)) * 0.01 * ows.wv_extend
                     
-                    bmesh.ops.transform(nbm, matrix=mat_trans@mat_rot2@mat_rot, verts=nbm.verts)
+                    bmesh.ops.transform(nbm, matrix=mat_trans@mat_rot2@mat_rot, verts=nbm.verts)                                       
                     verts_out += [v.co.to_tuple() for v in nbm.verts]
                     faces_out += [[lvo + j.index + ei * len(nbm.verts) for j in i.verts] for i in nbm.faces]
                     mis_out += [oi for f in nbm.faces]
